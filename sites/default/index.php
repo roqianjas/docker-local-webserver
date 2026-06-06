@@ -109,6 +109,50 @@ if (($_GET['action'] ?? '') === 'download_bat') {
     exit;
 }
 
+if (($_GET['action'] ?? '') === 'download_remove_bat') {
+    $rawDomain = $_GET['domain'] ?? '';
+    $rawDomain = preg_replace('/\.test$/i', '', trim($rawDomain));
+    $domain = preg_replace('/[^a-zA-Z0-9_-]/', '', $rawDomain) . '.test';
+    
+    $bat = "@echo off\r\n";
+    $bat .= ":: BatchGotAdmin\r\n";
+    $bat .= ":-------------------------------------\r\n";
+    $bat .= "REM  --> Check for permissions\r\n";
+    $bat .= ">nul 2>&1 \"%SYSTEMROOT%\\system32\\cacls.exe\" \"%SYSTEMROOT%\\system32\\config\\system\"\r\n";
+    $bat .= "REM --> If error flag set, we do not have admin.\r\n";
+    $bat .= "if '%errorlevel%' NEQ '0' (\r\n";
+    $bat .= "    echo Requesting administrative privileges...\r\n";
+    $bat .= "    goto UACPrompt\r\n";
+    $bat .= ") else ( goto gotAdmin )\r\n";
+    $bat .= ":UACPrompt\r\n";
+    $bat .= "    echo Set UAC = CreateObject^(\"Shell.Application\"^) > \"%temp%\\getadmin.vbs\"\r\n";
+    $bat .= "    echo UAC.ShellExecute \"%~s0\", \"\", \"\", \"runas\", 1 >> \"%temp%\\getadmin.vbs\"\r\n";
+    $bat .= "    \"%temp%\\getadmin.vbs\"\r\n";
+    $bat .= "    exit /B\r\n";
+    $bat .= ":gotAdmin\r\n";
+    $bat .= "    if exist \"%temp%\\getadmin.vbs\" ( del \"%temp%\\getadmin.vbs\" )\r\n";
+    $bat .= "    pushd \"%CD%\"\r\n";
+    $bat .= "    CD /D \"%~dp0\"\r\n";
+    $bat .= ":--------------------------------------\r\n\r\n";
+    
+    $bat .= "echo ===========================================\r\n";
+    $bat .= "echo  Docker Local Webserver - Clean Hosts File\r\n";
+    $bat .= "echo ===========================================\r\n";
+    $bat .= "echo.\r\n";
+    $bat .= "echo Removing $domain from Windows hosts file...\r\n";
+    $bat .= "findstr /I /V /C:\"$domain\" %WINDIR%\\System32\\drivers\\etc\\hosts > \"%temp%\\hosts_clean.tmp\"\r\n";
+    $bat .= "copy /Y \"%temp%\\hosts_clean.tmp\" %WINDIR%\\System32\\drivers\\etc\\hosts >nul\r\n";
+    $bat .= "del \"%temp%\\hosts_clean.tmp\"\r\n";
+    $bat .= "echo [OK] Domain removed successfully.\r\n";
+    $bat .= "echo.\r\n";
+    $bat .= "pause\r\n";
+
+    header('Content-Type: application/bat');
+    header('Content-Disposition: attachment; filename="clean-hosts-'.$domain.'.bat"');
+    echo $bat;
+    exit;
+}
+
 // ---- Handle POST Actions ----
 $action = $_POST['action'] ?? null;
 
@@ -345,7 +389,9 @@ if ($action === 'delete') {
             'type' => is_dir($siteDir) ? 'warning' : 'success',
             'title' => 'Project Deleted 🗑️',
             'message' => $msg,
-            'command' => "docker restart nginx"
+            'command' => "docker restart nginx",
+            'domain' => $domain,
+            'autoclean' => true
         ];
     }
     header('Location: /');
@@ -473,10 +519,10 @@ sort($sites);
         
         <div id="flash-container">
         <?php if ($flash): ?>
-            <div class="mb-8 p-6 rounded-2xl border <?= $flash['type'] === 'success' ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-red-500/10 border-red-500/20' ?> relative">
-                <h3 class="text-lg font-bold <?= $flash['type'] === 'success' ? 'text-emerald-400' : 'text-red-400' ?> flex items-center gap-2 mb-2">
-                    <iconify-icon icon="<?= $flash['type'] === 'success' ? 'mdi:check-circle' : 'mdi:alert-circle' ?>"></iconify-icon>
-                    <?= $flash['title'] ?? ($flash['type'] === 'success' ? 'Success' : 'Error') ?>
+            <div class="mb-8 p-6 rounded-2xl border <?= $flash['type'] === 'success' ? 'bg-emerald-500/10 border-emerald-500/20' : ($flash['type'] === 'warning' ? 'bg-amber-500/10 border-amber-500/20' : 'bg-red-500/10 border-red-500/20') ?> relative">
+                <h3 class="text-lg font-bold <?= $flash['type'] === 'success' ? 'text-emerald-400' : ($flash['type'] === 'warning' ? 'text-amber-400' : 'text-red-400') ?> flex items-center gap-2 mb-2">
+                    <iconify-icon icon="<?= $flash['type'] === 'success' ? 'mdi:check-circle' : ($flash['type'] === 'warning' ? 'mdi:alert' : 'mdi:alert-circle') ?>"></iconify-icon>
+                    <?= $flash['title'] ?? ucfirst($flash['type']) ?>
                 </h3>
                 <p class="text-slate-300"><?= $flash['message'] ?></p>
                 
@@ -484,11 +530,19 @@ sort($sites);
                 <div class="mt-4 p-4 bg-slate-950 rounded-xl border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4 group">
                     <div>
                         <p class="text-sm font-medium text-slate-200"><iconify-icon icon="mdi:information-outline" class="text-indigo-400"></iconify-icon> Action Required</p>
-                        <p class="text-xs text-slate-400 mt-1">Download and run the auto-fix script to make the domain accessible on Windows.</p>
+                        <p class="text-xs text-slate-400 mt-1">
+                            <?= !empty($flash['autoclean']) ? "Download and run the cleanup script to remove the domain from Windows." : "Download and run the auto-fix script to make the domain accessible on Windows." ?>
+                        </p>
                     </div>
+                    <?php if (!empty($flash['autoclean'])): ?>
+                    <a href="/?action=download_remove_bat&domain=<?= urlencode($flash['domain']) ?>" class="flex-shrink-0 inline-flex items-center justify-center gap-2 px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white text-sm font-medium rounded-lg transition-colors shadow-lg shadow-amber-500/20 whitespace-nowrap">
+                        <iconify-icon icon="mdi:delete-sweep"></iconify-icon> Auto-Clean Hosts File
+                    </a>
+                    <?php else: ?>
                     <a href="/?action=download_bat&domain=<?= urlencode($flash['domain']) ?>" class="flex-shrink-0 inline-flex items-center justify-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-lg transition-colors shadow-lg shadow-indigo-500/20 whitespace-nowrap">
                         <iconify-icon icon="mdi:download"></iconify-icon> Auto-Fix Hosts File
                     </a>
+                    <?php endif; ?>
                 </div>
                 <p class="text-xs text-slate-500 mt-2"><iconify-icon icon="mdi:shield-check"></iconify-icon> The script will prompt for Administrator privileges to edit <code>C:\Windows\System32\drivers\etc\hosts</code>.</p>
                 <?php endif; ?>
