@@ -59,6 +59,33 @@ function checkMariaDB() {
 
 // ---- Handle POST Actions ----
 $action = $_POST['action'] ?? null;
+
+// Require valid NPM credentials for any modifying action
+$npmToken = null;
+if (in_array($action, ['create', 'delete'])) {
+    $npmValid = false;
+    if (file_exists('/var/www/html/config.json')) {
+        $cfg = json_decode(file_get_contents('/var/www/html/config.json'), true);
+        if (!empty($cfg['npm_email']) && !empty($cfg['npm_password'])) {
+            $res = callNpmApi('POST', '/tokens', ['identity' => $cfg['npm_email'], 'secret' => $cfg['npm_password']]);
+            if ($res['status'] === 200 && isset($res['data']['token'])) {
+                $npmValid = true;
+                $npmToken = $res['data']['token'];
+            }
+        }
+    }
+    
+    if (!$npmValid) {
+        $_SESSION['flash'] = [
+            'type' => 'error', 
+            'title' => 'NPM Authentication Required', 
+            'message' => 'Anda harus login ke akun NPM terlebih dahulu via menu <strong>Settings (⚙️)</strong> di pojok kanan atas sebelum membuat atau menghapus project.'
+        ];
+        header("Location: /");
+        exit;
+    }
+}
+
 if ($action === 'create') {
     $name = preg_replace('/[^a-zA-Z0-9_-]/', '', $_POST['name'] ?? '');
     $phpVer = preg_replace('/[^0-9]/', '', $_POST['php_version'] ?? '84');
@@ -160,58 +187,48 @@ EOD;
                 );
                 
                 if (@file_put_contents($confPath, $config) !== false) {
-                    // Try NPM API integration
+                    // NPM API integration
                     $npmMsg = "";
-                    if (file_exists('/var/www/html/config.json')) {
-                        $cfg = json_decode(file_get_contents('/var/www/html/config.json'), true);
-                        if (!empty($cfg['npm_email']) && !empty($cfg['npm_password'])) {
-                            $res = callNpmApi('POST', '/tokens', ['identity' => $cfg['npm_email'], 'secret' => $cfg['npm_password']]);
-                            if ($res['status'] === 200 && isset($res['data']['token'])) {
-                                $token = $res['data']['token'];
-                                
-                                // Generate specific certificate for this domain using mkcert
-                                $certId = 0;
-                                $certPath = "/tmp/$domain.pem";
-                                $keyPath = "/tmp/$domain-key.pem";
-                                exec("CAROOT=/var/www/ssl/ca /var/www/ssl/mkcert -cert-file $certPath -key-file $keyPath $domain", $output, $ret);
-                                
-                                if ($ret === 0 && file_exists($certPath)) {
-                                    $uploadRes = uploadNpmCertificate($token, "$domain SSL", $certPath, $keyPath);
-                                    if ($uploadRes['status'] === 200 || $uploadRes['status'] === 201) {
-                                        $certId = $uploadRes['data']['id'];
-                                    }
-                                    @unlink($certPath);
-                                    @unlink($keyPath);
-                                }
-                                
-                                // Create Proxy Host
-                                $payload = [
-                                    'domain_names' => [$domain],
-                                    'forward_scheme' => 'http',
-                                    'forward_host' => 'nginx',
-                                    'forward_port' => 8000,
-                                    'certificate_id' => $certId,
-                                    'ssl_forced' => ($certId > 0),
-                                    'meta' => ['letsencrypt_agree' => false, 'dns_challenge' => false],
-                                    'advanced_config' => '',
-                                    'locations' => [],
-                                    'block_exploits' => false,
-                                    'caching_enabled' => false,
-                                    'allow_websocket_upgrade' => true,
-                                    'http2_support' => false,
-                                    'hsts_enabled' => false,
-                                    'hsts_subdomains' => false
-                                ];
-                                $proxyRes = callNpmApi('POST', '/nginx/proxy-hosts', $payload, $token);
-                                if ($proxyRes['status'] === 200 || $proxyRes['status'] === 201) {
-                                    $npmMsg = " & proxy host created in NPM!";
-                                } else {
-                                    $npmMsg = " (NPM API error: " . ($proxyRes['data']['error']['message'] ?? 'Unknown') . ")";
-                                }
-                            } else {
-                                $npmMsg = " (NPM Auth Failed! Check Settings.)";
-                            }
+                    $token = $npmToken;
+                    
+                    // Generate specific certificate for this domain using mkcert
+                    $certId = 0;
+                    $certPath = "/tmp/$domain.pem";
+                    $keyPath = "/tmp/$domain-key.pem";
+                    exec("CAROOT=/var/www/ssl/ca /var/www/ssl/mkcert -cert-file $certPath -key-file $keyPath $domain", $output, $ret);
+                    
+                    if ($ret === 0 && file_exists($certPath)) {
+                        $uploadRes = uploadNpmCertificate($token, "$domain SSL", $certPath, $keyPath);
+                        if ($uploadRes['status'] === 200 || $uploadRes['status'] === 201) {
+                            $certId = $uploadRes['data']['id'];
                         }
+                        @unlink($certPath);
+                        @unlink($keyPath);
+                    }
+                    
+                    // Create Proxy Host
+                    $payload = [
+                        'domain_names' => [$domain],
+                        'forward_scheme' => 'http',
+                        'forward_host' => 'nginx',
+                        'forward_port' => 8000,
+                        'certificate_id' => $certId,
+                        'ssl_forced' => ($certId > 0),
+                        'meta' => ['letsencrypt_agree' => false, 'dns_challenge' => false],
+                        'advanced_config' => '',
+                        'locations' => [],
+                        'block_exploits' => false,
+                        'caching_enabled' => false,
+                        'allow_websocket_upgrade' => true,
+                        'http2_support' => false,
+                        'hsts_enabled' => false,
+                        'hsts_subdomains' => false
+                    ];
+                    $proxyRes = callNpmApi('POST', '/nginx/proxy-hosts', $payload, $token);
+                    if ($proxyRes['status'] === 200 || $proxyRes['status'] === 201) {
+                        $npmMsg = " & proxy host created in NPM!";
+                    } else {
+                        $npmMsg = " (NPM API error: " . ($proxyRes['data']['error']['message'] ?? 'Unknown') . ")";
                     }
 
                     $_SESSION['flash'] = [
@@ -246,25 +263,17 @@ if ($action === 'delete') {
             @unlink($confPath);
         }
 
-        // NPM API Delete
-        if (file_exists('/var/www/html/config.json')) {
-            $cfg = json_decode(file_get_contents('/var/www/html/config.json'), true);
-            if (!empty($cfg['npm_email'])) {
-                $res = callNpmApi('POST', '/tokens', ['identity' => $cfg['npm_email'], 'secret' => $cfg['npm_password']]);
-                if ($res['status'] === 200) {
-                    $token = $res['data']['token'];
-                    $hosts = callNpmApi('GET', '/nginx/proxy-hosts', null, $token);
-                    if ($hosts['status'] === 200) {
-                        foreach ($hosts['data'] as $host) {
-                            if (in_array($domain, $host['domain_names'])) {
-                                $certId = $host['certificate_id'];
-                                callNpmApi('DELETE', '/nginx/proxy-hosts/' . $host['id'], null, $token);
-                                if ($certId > 0) {
-                                    callNpmApi('DELETE', '/nginx/certificates/' . $certId, null, $token);
-                                }
-                            }
-                        }
+        // 1. Delete Proxy Host from NPM via API
+        $proxyRes = callNpmApi('GET', '/nginx/proxy-hosts', [], $npmToken);
+        if ($proxyRes['status'] === 200) {
+            foreach ($proxyRes['data'] as $host) {
+                if (in_array($domain, $host['domain_names'])) {
+                    $certId = $host['certificate_id'] ?? 0;
+                    callNpmApi('DELETE', "/nginx/proxy-hosts/{$host['id']}", [], $npmToken);
+                    if ($certId > 0) {
+                        callNpmApi('DELETE', "/nginx/certificates/$certId", [], $npmToken);
                     }
+                    break;
                 }
             }
         }
