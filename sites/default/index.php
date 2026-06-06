@@ -458,6 +458,7 @@ sort($sites);
     
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
         
+        <div id="flash-container">
         <?php if ($flash): ?>
             <div class="mb-8 p-6 rounded-2xl border <?= $flash['type'] === 'success' ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-red-500/10 border-red-500/20' ?> relative">
                 <h3 class="text-lg font-bold <?= $flash['type'] === 'success' ? 'text-emerald-400' : 'text-red-400' ?> flex items-center gap-2 mb-2">
@@ -480,6 +481,7 @@ sort($sites);
                 <?php endif; ?>
             </div>
         <?php endif; ?>
+        </div>
         
         <!-- Header Section -->
         <header class="text-center mb-16 relative">
@@ -643,7 +645,7 @@ sort($sites);
                         </div>
                     </div>
                     
-                    <div class="glass-panel p-2">
+                    <div id="sites-container" class="glass-panel p-2">
                         <?php if (empty($sites)): ?>
                             <div class="p-8 text-center">
                                 <iconify-icon icon="mdi:folder-alert-outline" class="text-slate-600 text-5xl mb-4"></iconify-icon>
@@ -664,13 +666,9 @@ sort($sites);
                                                 Open <iconify-icon icon="mdi:open-in-new"></iconify-icon>
                                             </span>
                                         </a>
-                                        <form method="POST" action="/" class="ml-4 pr-2" onsubmit="return confirm('Are you sure you want to completely delete <?= htmlspecialchars($site) ?> and all its files?');">
-                                            <input type="hidden" name="action" value="delete">
-                                            <input type="hidden" name="domain" value="<?= htmlspecialchars($site) ?>">
-                                            <button type="submit" class="text-slate-500 hover:text-red-400 p-2 rounded-lg hover:bg-red-500/10 transition-colors tooltip" title="Delete Site">
-                                                <iconify-icon icon="mdi:trash-can-outline" class="text-lg"></iconify-icon>
-                                            </button>
-                                        </form>
+                                        <button type="button" onclick="confirmDelete('<?= htmlspecialchars($site) ?>')" class="ml-4 text-slate-500 hover:text-red-400 p-2 rounded-lg hover:bg-red-500/10 transition-colors tooltip" title="Delete Site">
+                                            <iconify-icon icon="mdi:trash-can-outline" class="text-lg"></iconify-icon>
+                                        </button>
                                     </div>
                                 </li>
                                 <?php endforeach; ?>
@@ -787,7 +785,7 @@ sort($sites);
                         <iconify-icon icon="mdi:close" class="text-xl"></iconify-icon>
                     </button>
                 </div>
-                <form method="POST" action="/">
+                <form method="POST" action="/" class="spa-form">
                     <input type="hidden" name="action" value="create">
                     <div class="px-6 py-6 space-y-5">
                         
@@ -894,5 +892,80 @@ sort($sites);
             </div>
         </div>
     </div>
+    <!-- Delete Site Modal -->
+    <div id="deleteModal" class="fixed inset-0 z-[60] hidden opacity-0 modal-transition">
+        <div class="absolute inset-0 bg-slate-950/80 backdrop-blur-sm" onclick="toggleModal('deleteModal')"></div>
+        <div class="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:p-0">
+            <div class="relative bg-surface border border-slate-700 rounded-2xl text-left overflow-hidden shadow-[0_20px_50px_rgba(0,0,0,0.5)] transform transition-all sm:my-8 sm:max-w-md w-full">
+                <div class="px-6 py-5 border-b border-slate-700/50 flex justify-between items-center bg-red-500/10">
+                    <h3 class="text-lg font-semibold text-red-400 flex items-center gap-2">
+                        <iconify-icon icon="mdi:alert-circle-outline"></iconify-icon>
+                        Confirm Deletion
+                    </h3>
+                    <button type="button" onclick="toggleModal('deleteModal')" class="text-slate-400 hover:text-white transition-colors">
+                        <iconify-icon icon="mdi:close" class="text-xl"></iconify-icon>
+                    </button>
+                </div>
+                <form id="deleteForm" method="POST" action="/" class="spa-form">
+                    <input type="hidden" name="action" value="delete">
+                    <input type="hidden" name="domain" id="deleteDomainInput" value="">
+                    <div class="px-6 py-6 text-slate-300">
+                        <p>Are you sure you want to completely delete <strong id="deleteDomainText" class="text-white"></strong> and all its files?</p>
+                        <p class="text-sm text-red-400 mt-3 p-3 bg-red-500/10 rounded-lg border border-red-500/20"><iconify-icon icon="mdi:warning"></iconify-icon> This action cannot be undone.</p>
+                    </div>
+                    <div class="px-6 py-4 bg-slate-900/80 border-t border-slate-700/50 flex justify-end gap-3 rounded-b-2xl">
+                        <button type="button" onclick="toggleModal('deleteModal')" class="px-4 py-2 text-sm font-medium text-slate-300 hover:text-white transition-colors">
+                            Cancel
+                        </button>
+                        <button type="submit" class="bg-red-600 hover:bg-red-500 text-white px-5 py-2 rounded-lg text-sm font-medium transition-colors shadow-lg shadow-red-500/20 flex items-center gap-2">
+                            <iconify-icon icon="mdi:trash-can-outline"></iconify-icon> Delete Project
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function confirmDelete(domain) {
+            document.getElementById('deleteDomainInput').value = domain;
+            document.getElementById('deleteDomainText').textContent = domain;
+            toggleModal('deleteModal');
+        }
+
+        // SPA Form Submission Handler
+        document.querySelectorAll('.spa-form').forEach(form => {
+            form.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const btn = form.querySelector('button[type="submit"]');
+                const originalHtml = btn.innerHTML;
+                btn.innerHTML = '<iconify-icon icon="mdi:loading" class="animate-spin"></iconify-icon> Processing...';
+                btn.disabled = true;
+
+                try {
+                    const res = await fetch(form.action, {
+                        method: form.method,
+                        body: new FormData(form)
+                    });
+                    const text = await res.text();
+                    const parser = new DOMParser();
+                    const doc = parser.parseFromString(text, 'text/html');
+                    
+                    document.getElementById('flash-container').innerHTML = doc.getElementById('flash-container').innerHTML;
+                    document.getElementById('sites-container').innerHTML = doc.getElementById('sites-container').innerHTML;
+                    
+                    if(form.closest('.modal-transition')) {
+                        toggleModal(form.closest('.modal-transition').id);
+                    }
+                    form.reset();
+                } catch (err) {
+                    alert('An error occurred while processing your request.');
+                } finally {
+                    btn.innerHTML = originalHtml;
+                    btn.disabled = false;
+                }
+            });
+        });
+    </script>
 </body>
 </html>
