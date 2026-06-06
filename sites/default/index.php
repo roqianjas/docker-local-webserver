@@ -117,6 +117,7 @@ if (in_array($action, ['create', 'delete'])) {
     if (file_exists('/var/www/html/config.json')) {
         $cfg = json_decode(file_get_contents('/var/www/html/config.json'), true);
         if (!empty($cfg['npm_email']) && !empty($cfg['npm_password'])) {
+            require_once __DIR__ . '/npm_api.php';
             $res = callNpmApi('POST', '/tokens', ['identity' => $cfg['npm_email'], 'secret' => $cfg['npm_password']]);
             if ($res['status'] === 200 && isset($res['data']['token'])) {
                 $npmValid = true;
