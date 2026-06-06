@@ -57,6 +57,56 @@ function checkMariaDB() {
     }
 }
 
+// ---- Handle GET Actions ----
+if (($_GET['action'] ?? '') === 'download_bat') {
+    $domain = preg_replace('/[^a-zA-Z0-9_-]/', '', $_GET['domain'] ?? '') . '.test';
+    
+    $bat = "@echo off\r\n";
+    $bat .= ":: BatchGotAdmin\r\n";
+    $bat .= ":-------------------------------------\r\n";
+    $bat .= "REM  --> Check for permissions\r\n";
+    $bat .= ">nul 2>&1 \"%SYSTEMROOT%\\system32\\cacls.exe\" \"%SYSTEMROOT%\\system32\\config\\system\"\r\n";
+    $bat .= "REM --> If error flag set, we do not have admin.\r\n";
+    $bat .= "if '%errorlevel%' NEQ '0' (\r\n";
+    $bat .= "    echo Requesting administrative privileges...\r\n";
+    $bat .= "    goto UACPrompt\r\n";
+    $bat .= ") else ( goto gotAdmin )\r\n";
+    $bat .= ":UACPrompt\r\n";
+    $bat .= "    echo Set UAC = CreateObject^(\"Shell.Application\"^) > \"%temp%\\getadmin.vbs\"\r\n";
+    $bat .= "    echo UAC.ShellExecute \"%~s0\", \"\", \"\", \"runas\", 1 >> \"%temp%\\getadmin.vbs\"\r\n";
+    $bat .= "    \"%temp%\\getadmin.vbs\"\r\n";
+    $bat .= "    exit /B\r\n";
+    $bat .= ":gotAdmin\r\n";
+    $bat .= "    if exist \"%temp%\\getadmin.vbs\" ( del \"%temp%\\getadmin.vbs\" )\r\n";
+    $bat .= "    pushd \"%CD%\"\r\n";
+    $bat .= "    CD /D \"%~dp0\"\r\n";
+    $bat .= ":--------------------------------------\r\n\r\n";
+    
+    $bat .= "echo ===========================================\r\n";
+    $bat .= "echo  Docker Local Webserver - Fix Hosts File\r\n";
+    $bat .= "echo ===========================================\r\n";
+    $bat .= "echo.\r\n";
+    $bat .= "echo Adding $domain to Windows hosts file...\r\n";
+    $bat .= "findstr /I /C:\"$domain\" %WINDIR%\\System32\\drivers\\etc\\hosts >nul\r\n";
+    $bat .= "if %errorlevel% neq 0 (\r\n";
+    $bat .= "    echo 127.0.0.1    $domain >> %WINDIR%\\System32\\drivers\\etc\\hosts\r\n";
+    $bat .= "    echo [OK] Domain added successfully.\r\n";
+    $bat .= ") else (\r\n";
+    $bat .= "    echo [INFO] Domain already exists in hosts file.\r\n";
+    $bat .= ")\r\n";
+    $bat .= "echo.\r\n";
+    $bat .= "echo Reloading Nginx container...\r\n";
+    $bat .= "docker exec nginx nginx -s reload\r\n";
+    $bat .= "echo.\r\n";
+    $bat .= "echo Done! You can now access https://$domain in your browser.\r\n";
+    $bat .= "pause\r\n";
+
+    header('Content-Type: application/bat');
+    header('Content-Disposition: attachment; filename="fix-hosts-'.$domain.'.bat"');
+    echo $bat;
+    exit;
+}
+
 // ---- Handle POST Actions ----
 $action = $_POST['action'] ?? null;
 
@@ -235,7 +285,7 @@ EOD;
                         'type' => 'success',
                         'title' => 'Project Created Successfully! 🎉',
                         'message' => "Folder <strong>$domain</strong> and Nginx config generated" . $npmMsg . ".",
-                        'command' => "Add-Content -Path \$env:SystemRoot\\System32\\drivers\\etc\\hosts -Value \"`n127.0.0.1`t$domain\" ; docker restart nginx"
+                        'domain' => $domain
                     ];
                 } else {
                     $_SESSION['flash'] = ['type' => 'error', 'message' => "Failed to write Nginx config. Are volumes mounted?"];
@@ -416,14 +466,17 @@ sort($sites);
                 </h3>
                 <p class="text-slate-300"><?= $flash['message'] ?></p>
                 
-                <?php if (!empty($flash['command'])): ?>
-                <div class="mt-4 p-4 bg-slate-950 rounded-xl border border-slate-800 flex items-center justify-between group">
-                    <code class="text-sm text-pink-400 font-mono select-all overflow-x-auto custom-scrollbar pr-4"><?= htmlspecialchars($flash['command']) ?></code>
-                    <button onclick="copyToClipboard(`<?= htmlspecialchars($flash['command']) ?>`, this)" class="flex-shrink-0 text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors flex items-center gap-1">
-                        <iconify-icon icon="mdi:content-copy"></iconify-icon> Copy
-                    </button>
+                <?php if (!empty($flash['domain'])): ?>
+                <div class="mt-4 p-4 bg-slate-950 rounded-xl border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4 group">
+                    <div>
+                        <p class="text-sm font-medium text-slate-200"><iconify-icon icon="mdi:information-outline" class="text-indigo-400"></iconify-icon> Action Required</p>
+                        <p class="text-xs text-slate-400 mt-1">Download and run the auto-fix script to make the domain accessible on Windows.</p>
+                    </div>
+                    <a href="/?action=download_bat&domain=<?= urlencode($flash['domain']) ?>" class="flex-shrink-0 inline-flex items-center justify-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-lg transition-colors shadow-lg shadow-indigo-500/20 whitespace-nowrap">
+                        <iconify-icon icon="mdi:download"></iconify-icon> Auto-Fix Hosts File
+                    </a>
                 </div>
-                <p class="text-xs text-slate-500 mt-2"><iconify-icon icon="mdi:information-outline"></iconify-icon> <strong>Action Required:</strong> Please copy and run the command above in your Windows PowerShell (as Administrator) to finalize the changes.</p>
+                <p class="text-xs text-slate-500 mt-2"><iconify-icon icon="mdi:shield-check"></iconify-icon> The script will prompt for Administrator privileges to edit <code>C:\Windows\System32\drivers\etc\hosts</code>.</p>
                 <?php endif; ?>
             </div>
         <?php endif; ?>
