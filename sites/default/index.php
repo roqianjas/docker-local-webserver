@@ -9,15 +9,15 @@ require_once __DIR__ . '/npm_api.php';
 
 // ---- Helper Functions ----
 function deleteDir($dirPath) {
-    if (!is_dir($dirPath)) return;
+    if (!is_dir($dirPath)) return false;
     $files = scandir($dirPath);
     foreach ($files as $file) {
         if ($file !== '.' && $file !== '..') {
             $path = "$dirPath/$file";
-            is_dir($path) ? deleteDir($path) : unlink($path);
+            is_dir($path) ? deleteDir($path) : @unlink($path);
         }
     }
-    rmdir($dirPath);
+    return @rmdir($dirPath);
 }
 
 function checkService($host, $port, $timeout = 2) {
@@ -59,7 +59,9 @@ function checkMariaDB() {
 
 // ---- Handle GET Actions ----
 if (($_GET['action'] ?? '') === 'download_bat') {
-    $domain = preg_replace('/[^a-zA-Z0-9_-]/', '', $_GET['domain'] ?? '') . '.test';
+    $rawDomain = $_GET['domain'] ?? '';
+    $rawDomain = preg_replace('/\.test$/i', '', trim($rawDomain));
+    $domain = preg_replace('/[^a-zA-Z0-9_-]/', '', $rawDomain) . '.test';
     
     $bat = "@echo off\r\n";
     $bat .= ":: BatchGotAdmin\r\n";
@@ -138,7 +140,10 @@ if (in_array($action, ['create', 'delete'])) {
 }
 
 if ($action === 'create') {
-    $name = preg_replace('/[^a-zA-Z0-9_-]/', '', $_POST['name'] ?? '');
+    $rawName = $_POST['name'] ?? '';
+    // Hapus akhiran .test jika user tidak sengaja mengetiknya
+    $rawName = preg_replace('/\.test$/i', '', trim($rawName));
+    $name = preg_replace('/[^a-zA-Z0-9_-]/', '', $rawName);
     $phpVer = preg_replace('/[^0-9]/', '', $_POST['php_version'] ?? '84');
     $type = $_POST['type'] ?? 'standard';
     
@@ -309,7 +314,7 @@ if ($action === 'delete') {
         $siteDir = "/var/www/html/$domain";
         $confPath = "/etc/nginx/conf.d/$domain.conf";
         
-        deleteDir($siteDir);
+        $deletedComplete = deleteDir($siteDir);
         if (file_exists($confPath)) {
             @unlink($confPath);
         }
@@ -329,10 +334,17 @@ if ($action === 'delete') {
             }
         }
         
+        $msg = "Project <strong>$domain</strong> configuration and routing have been removed.";
+        if (is_dir($siteDir)) {
+            $msg .= "<br><br><span class='text-yellow-400'>⚠️ Note: Could not completely delete the folder due to permissions/file locks. You may need to delete the `sites/$domain` folder manually from Windows.</span>";
+        } else {
+            $msg .= " The folder has also been successfully deleted.";
+        }
+        
         $_SESSION['flash'] = [
-            'type' => 'success',
+            'type' => is_dir($siteDir) ? 'warning' : 'success',
             'title' => 'Project Deleted 🗑️',
-            'message' => "Project <strong>$domain</strong> and its configuration have been removed.",
+            'message' => $msg,
             'command' => "docker restart nginx"
         ];
     }
@@ -934,37 +946,13 @@ sort($sites);
             toggleModal('deleteModal');
         }
 
-        // SPA Form Submission Handler
         document.querySelectorAll('.spa-form').forEach(form => {
-            form.addEventListener('submit', async (e) => {
-                e.preventDefault();
+            form.addEventListener('submit', (e) => {
                 const btn = form.querySelector('button[type="submit"]');
-                const originalHtml = btn.innerHTML;
                 btn.innerHTML = '<iconify-icon icon="mdi:loading" class="animate-spin"></iconify-icon> Processing...';
-                btn.disabled = true;
-
-                try {
-                    const res = await fetch(form.action, {
-                        method: form.method,
-                        body: new FormData(form)
-                    });
-                    const text = await res.text();
-                    const parser = new DOMParser();
-                    const doc = parser.parseFromString(text, 'text/html');
-                    
-                    document.getElementById('flash-container').innerHTML = doc.getElementById('flash-container').innerHTML;
-                    document.getElementById('sites-container').innerHTML = doc.getElementById('sites-container').innerHTML;
-                    
-                    if(form.closest('.modal-transition')) {
-                        toggleModal(form.closest('.modal-transition').id);
-                    }
-                    form.reset();
-                } catch (err) {
-                    alert('An error occurred while processing your request.');
-                } finally {
-                    btn.innerHTML = originalHtml;
-                    btn.disabled = false;
-                }
+                // Biarkan form tersubmit secara normal (browser reload)
+                // Disable button setelah sedikit delay agar form tetap terkirim
+                setTimeout(() => { btn.disabled = true; }, 10);
             });
         });
     </script>
