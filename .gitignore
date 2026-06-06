@@ -1,0 +1,48 @@
+# === Persistent Data (database, cache, NPM, etc.) ===
+data/
+
+# === Log Files ===
+logs/
+
+# === SSL Certificates (generated per-user by mkcert) ===
+config/ssl/
+
+# === User Environment (contains passwords) ===
+.env
+
+# === User Project Sites (only keep default/) ===
+sites/*
+!sites/default/
+
+# === NPM API Credentials (user-specific) ===
+sites/config.json
+
+# === OS Files ===
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# === IDE ===
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# === Docker ===
+.docker/
+
+# === mkcert binary (downloaded per-OS by setup.ps1) ===
+mkcert.exe
+
+# === Leftover mkcert output files ===
+_wildcard.*
+*.pem
+
+# === User-generated Nginx site configs (only keep defaults) ===
+config/nginx/sites/*.conf
+!config/nginx/sites/default.conf
+!config/nginx/sites/_template.conf.example
+
+# === Gemini / AI artifacts ===
+.gemini/
+IMPLEMENTATION_PLAN.md

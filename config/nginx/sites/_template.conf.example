@@ -1,0 +1,56 @@
+# ============================================================
+# TEMPLATE — Nginx Site Configuration
+# ============================================================
+# Copy file ini dan rename sesuai domain, contoh:
+#   _template.conf → myapp.test.conf
+#
+# Ganti placeholder:
+#   {{DOMAIN}}      → nama domain (contoh: myapp.test)
+#   {{PHP_VERSION}} → versi PHP (contoh: php84, php83, php82, php81, php74)
+#   {{ROOT_PATH}}   → path root (contoh: /var/www/html/myapp.test)
+#                     Untuk Laravel: /var/www/html/myapp.test/public
+#
+# Setelah edit, reload nginx:
+#   docker compose exec nginx nginx -s reload
+# ============================================================
+
+server {
+    listen 8000;
+    server_name {{DOMAIN}};
+
+    root {{ROOT_PATH}};
+    index index.php index.html;
+
+    # ---- Clean URLs (Laravel/WordPress/etc.) ----
+    location / {
+        try_files $uri $uri/ /index.php?$query_string;
+    }
+
+    # ---- PHP Processing ----
+    location ~ \.php$ {
+        try_files $uri =404;
+        fastcgi_split_path_info ^(.+\.php)(/.+)$;
+        fastcgi_pass {{PHP_VERSION}}:9000;
+        fastcgi_index index.php;
+        include fastcgi_params;
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        fastcgi_param PATH_INFO $fastcgi_path_info;
+        fastcgi_read_timeout 300;
+        fastcgi_buffers 16 16k;
+        fastcgi_buffer_size 32k;
+    }
+
+    # ---- Static Files ----
+    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
+        expires 1d;
+        add_header Cache-Control "public, immutable";
+        try_files $uri =404;
+    }
+
+    # ---- Deny dotfiles (except .well-known) ----
+    location ~ /\.(?!well-known).* {
+        deny all;
+        access_log off;
+        log_not_found off;
+    }
+}

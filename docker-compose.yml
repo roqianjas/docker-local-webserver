@@ -1,0 +1,401 @@
+# ============================================================
+# Docker Local Webserver — Main Compose File
+# ============================================================
+# 17 containers, 6 GUI panels
+# Docs: ./docs/ARCHITECTURE.md
+# ============================================================
+
+services:
+
+  # ============================================================
+  # 1. NGINX PROXY MANAGER — Domain & SSL Management (GUI)
+  # Panel: http://localhost:81
+  # Default login: admin@example.com / changeme
+  # ============================================================
+  nginx-proxy-manager:
+    image: jc21/nginx-proxy-manager:latest
+    container_name: npm
+    restart: unless-stopped
+    ports:
+      - "${NPM_HTTP_PORT:-80}:80"
+      - "${NPM_HTTPS_PORT:-443}:443"
+      - "${NPM_ADMIN_PORT:-81}:81"
+    volumes:
+      - ./data/npm/data:/data
+      - ./data/npm/letsencrypt:/etc/letsencrypt
+      - ./config/ssl:/etc/ssl/custom:ro
+    environment:
+      - TZ=${TZ:-Asia/Jakarta}
+    healthcheck:
+      test: ["CMD", "/usr/bin/check-health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - webserver
+
+  # ============================================================
+  # 2. NGINX — Internal Web Server for PHP Sites
+  # Proxied by NPM, serves PHP via FastCGI
+  # ============================================================
+  nginx:
+    image: nginx:stable-alpine
+    container_name: nginx
+    restart: unless-stopped
+    expose:
+      - "8000"
+    ports:
+      - "${NGINX_PORT:-8000}:8000"
+    volumes:
+      - ./sites:/var/www/html:cached
+      - ./config/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./config/nginx/sites:/etc/nginx/conf.d:ro
+      - ./logs/nginx:/var/log/nginx
+    depends_on:
+      - php84
+      - php83
+      - php82
+      - php81
+      - php74
+    environment:
+      - TZ=${TZ:-Asia/Jakarta}
+    networks:
+      - webserver
+
+  # ============================================================
+  # 3-7. PHP-FPM CONTAINERS (5 versions)
+  # ============================================================
+
+  php84:
+    build:
+      context: ./dockerfiles
+      dockerfile: php.Dockerfile
+      args:
+        PHP_VERSION: "8.4"
+    container_name: php84
+    restart: unless-stopped
+    volumes:
+      - ./sites:/var/www/html:cached
+      - ./config/php/php.ini:/usr/local/etc/php/conf.d/99-custom.ini:ro
+      - ./config/php/xdebug.ini:/usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini:ro
+      - ./config/nginx/sites:/etc/nginx/conf.d:rw
+      - ./config/ssl:/var/www/ssl:ro
+    environment:
+      - TZ=${TZ:-Asia/Jakarta}
+      - XDEBUG_ENABLED=${XDEBUG_ENABLED:-false}
+      - PHP_IDE_CONFIG=serverName=docker
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - webserver
+
+  php83:
+    build:
+      context: ./dockerfiles
+      dockerfile: php.Dockerfile
+      args:
+        PHP_VERSION: "8.3"
+    container_name: php83
+    restart: unless-stopped
+    volumes:
+      - ./sites:/var/www/html:cached
+      - ./config/php/php.ini:/usr/local/etc/php/conf.d/99-custom.ini:ro
+      - ./config/php/xdebug.ini:/usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini:ro
+    environment:
+      - TZ=${TZ:-Asia/Jakarta}
+      - XDEBUG_ENABLED=${XDEBUG_ENABLED:-false}
+      - PHP_IDE_CONFIG=serverName=docker
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - webserver
+
+  php82:
+    build:
+      context: ./dockerfiles
+      dockerfile: php.Dockerfile
+      args:
+        PHP_VERSION: "8.2"
+    container_name: php82
+    restart: unless-stopped
+    volumes:
+      - ./sites:/var/www/html:cached
+      - ./config/php/php.ini:/usr/local/etc/php/conf.d/99-custom.ini:ro
+      - ./config/php/xdebug.ini:/usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini:ro
+    environment:
+      - TZ=${TZ:-Asia/Jakarta}
+      - XDEBUG_ENABLED=${XDEBUG_ENABLED:-false}
+      - PHP_IDE_CONFIG=serverName=docker
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - webserver
+
+  php81:
+    build:
+      context: ./dockerfiles
+      dockerfile: php.Dockerfile
+      args:
+        PHP_VERSION: "8.1"
+    container_name: php81
+    restart: unless-stopped
+    volumes:
+      - ./sites:/var/www/html:cached
+      - ./config/php/php.ini:/usr/local/etc/php/conf.d/99-custom.ini:ro
+      - ./config/php/xdebug.ini:/usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini:ro
+    environment:
+      - TZ=${TZ:-Asia/Jakarta}
+      - XDEBUG_ENABLED=${XDEBUG_ENABLED:-false}
+      - PHP_IDE_CONFIG=serverName=docker
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - webserver
+
+  php74:
+    build:
+      context: ./dockerfiles
+      dockerfile: php74.Dockerfile
+    container_name: php74
+    restart: unless-stopped
+    volumes:
+      - ./sites:/var/www/html:cached
+      - ./config/php/php.ini:/usr/local/etc/php/conf.d/99-custom.ini:ro
+    environment:
+      - TZ=${TZ:-Asia/Jakarta}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - webserver
+
+  # ============================================================
+  # 8. PHP CRON — Scheduled Tasks
+  # Config: ./config/cron/crontab
+  # ============================================================
+  php-cron:
+    build:
+      context: ./dockerfiles
+      dockerfile: php.Dockerfile
+      args:
+        PHP_VERSION: "8.4"
+    container_name: php-cron
+    restart: unless-stopped
+    volumes:
+      - ./sites:/var/www/html:cached
+      - ./config/php/php.ini:/usr/local/etc/php/conf.d/99-custom.ini:ro
+      - ./config/cron/crontab:/var/spool/cron/crontabs/www-data:ro
+      - ./logs/cron:/var/log/cron
+    entrypoint: ["crond", "-f", "-l", "2"]
+    user: root
+    environment:
+      - TZ=${TZ:-Asia/Jakarta}
+    networks:
+      - webserver
+
+  # ============================================================
+  # 9. PHP WORKER — Queue Worker + Supervisor
+  # Config: ./config/supervisor/worker.conf
+  # Env: WORKER_PROJECT, WORKER_QUEUE_CONNECTION
+  # ============================================================
+  php-worker:
+    build:
+      context: ./dockerfiles
+      dockerfile: php.Dockerfile
+      args:
+        PHP_VERSION: "8.4"
+    container_name: php-worker
+    restart: unless-stopped
+    volumes:
+      - ./sites:/var/www/html:cached
+      - ./config/php/php.ini:/usr/local/etc/php/conf.d/99-custom.ini:ro
+      - ./config/supervisor/worker.conf:/etc/supervisor/conf.d/worker.conf:ro
+      - ./logs/worker:/var/log/worker
+    entrypoint: ["/usr/bin/supervisord", "-n", "-c", "/etc/supervisor/conf.d/worker.conf"]
+    environment:
+      - TZ=${TZ:-Asia/Jakarta}
+      - WORKER_PROJECT=${WORKER_PROJECT:-default}
+      - WORKER_QUEUE_CONNECTION=${WORKER_QUEUE_CONNECTION:-redis}
+    networks:
+      - webserver
+
+  # ============================================================
+  # 10. NODE.JS 22 LTS — Next.js, Vite, Nuxt + pm2
+  # ============================================================
+  node:
+    build:
+      context: ./dockerfiles
+      dockerfile: node.Dockerfile
+    container_name: node
+    restart: unless-stopped
+    volumes:
+      - ./sites:/var/www/html:cached
+    working_dir: /var/www/html
+    ports:
+      - "3000:3000"
+      - "3001:3001"
+      - "3002:3002"
+      - "3003:3003"
+      - "3004:3004"
+      - "3005:3005"
+    command: ["tail", "-f", "/dev/null"]
+    environment:
+      - TZ=${TZ:-Asia/Jakarta}
+      - NODE_ENV=development
+    networks:
+      - webserver
+
+  # ============================================================
+  # 11. MARIADB 11 — Database Server
+  # Port: 3306
+  # ============================================================
+  mariadb:
+    image: mariadb:11
+    container_name: mariadb
+    restart: unless-stopped
+    ports:
+      - "${MARIADB_PORT:-3306}:3306"
+    volumes:
+      - ./data/mariadb:/var/lib/mysql
+    environment:
+      - TZ=${TZ:-Asia/Jakarta}
+      - MARIADB_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:-secret}
+      - MARIADB_DATABASE=${MYSQL_DATABASE:-homestead}
+      - MARIADB_USER=${MYSQL_USER:-homestead}
+      - MARIADB_PASSWORD=${MYSQL_PASSWORD:-secret}
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    networks:
+      - webserver
+
+  # ============================================================
+  # 12. PHPMYADMIN — Database Management (GUI)
+  # Panel: http://localhost:8080
+  # ============================================================
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin:latest
+    container_name: phpmyadmin
+    restart: unless-stopped
+    ports:
+      - "${PHPMYADMIN_PORT:-8080}:80"
+    environment:
+      - PMA_HOST=mariadb
+      - PMA_PORT=3306
+      - UPLOAD_LIMIT=100M
+      - MEMORY_LIMIT=256M
+      - TZ=${TZ:-Asia/Jakarta}
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    networks:
+      - webserver
+
+  # ============================================================
+  # 13. REDIS 7 — Cache & Session Store
+  # Port: 6379
+  # ============================================================
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - ./data/redis:/data
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    environment:
+      - TZ=${TZ:-Asia/Jakarta}
+    networks:
+      - webserver
+
+  # ============================================================
+  # 14. REDISINSIGHT — Redis Visual Management (GUI)
+  # Panel: http://localhost:8001
+  # ============================================================
+  redisinsight:
+    image: redis/redisinsight:latest
+    container_name: redisinsight
+    restart: unless-stopped
+    ports:
+      - "${REDISINSIGHT_PORT:-8001}:5540"
+    volumes:
+      - ./data/redisinsight:/data
+    environment:
+      - TZ=${TZ:-Asia/Jakarta}
+    depends_on:
+      - redis
+    networks:
+      - webserver
+
+  # ============================================================
+  # 15. MAILPIT — Email Testing (GUI)
+  # Panel: http://localhost:8025
+  # SMTP: localhost:1025
+  # ============================================================
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: mailpit
+    restart: unless-stopped
+    ports:
+      - "${MAILPIT_UI_PORT:-8025}:8025"
+      - "${MAILPIT_SMTP_PORT:-1025}:1025"
+    volumes:
+      - ./data/mailpit:/data
+    environment:
+      - TZ=${TZ:-Asia/Jakarta}
+      - MP_MAX_MESSAGES=5000
+      - MP_DATA_FILE=/data/mailpit.db
+    networks:
+      - webserver
+
+  # ============================================================
+  # 16. DOCKGE — Docker Stack Management (GUI)
+  # Panel: http://localhost:5001
+  # ============================================================
+  dockge:
+    image: louislam/dockge:1
+    container_name: dockge
+    restart: unless-stopped
+    ports:
+      - "${DOCKGE_PORT:-5001}:5001"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./data/dockge:/app/data
+      - ./:/opt/stacks/docker-webserver
+    environment:
+      - DOCKGE_STACKS_DIR=/opt/stacks
+    networks:
+      - webserver
+
+  # ============================================================
+  # 17. DOZZLE — Real-time Docker Log Viewer (GUI)
+  # Panel: http://localhost:9999
+  # ============================================================
+  dozzle:
+    image: amir20/dozzle:latest
+    container_name: dozzle
+    restart: unless-stopped
+    ports:
+      - "${DOZZLE_PORT:-9999}:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    environment:
+      - TZ=${TZ:-Asia/Jakarta}
+    networks:
+      - webserver
+
+# ============================================================
+# NETWORKS
+# ============================================================
+networks:
+  webserver:
+    driver: bridge
+    name: webserver

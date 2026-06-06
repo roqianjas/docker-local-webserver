@@ -1,0 +1,26 @@
+# ============================================================
+# Cron Schedule — PHP Scheduled Tasks
+# ============================================================
+# File ini di-mount ke container php-cron.
+# Edit lalu restart: docker compose restart php-cron
+#
+# Format: minute hour day-of-month month day-of-week command
+# ============================================================
+
+# ------ Laravel Scheduler ------
+# Uncomment dan ganti PROJECT_FOLDER dengan nama project Anda
+# * * * * * cd /var/www/html/PROJECT_FOLDER && php artisan schedule:run >> /var/log/cron/schedule.log 2>&1
+
+# ------ Contoh: Multiple Projects ------
+# * * * * * cd /var/www/html/tokoku.test && php artisan schedule:run >> /var/log/cron/tokoku.log 2>&1
+# * * * * * cd /var/www/html/api.test && php artisan schedule:run >> /var/log/cron/api.log 2>&1
+
+# ------ Contoh: Custom Cron Jobs ------
+# Backup database setiap hari jam 2 pagi
+# 0 2 * * * cd /var/www/html/tokoku.test && php artisan backup:run >> /var/log/cron/backup.log 2>&1
+
+# Clear cache setiap hari jam 3 pagi
+# 0 3 * * * cd /var/www/html/tokoku.test && php artisan cache:clear >> /var/log/cron/cache.log 2>&1
+
+# WordPress wp-cron (setiap 5 menit)
+# */5 * * * * cd /var/www/html/blog.test && php wp-cron.php >> /var/log/cron/wordpress.log 2>&1
