@@ -63,6 +63,16 @@ if (($_GET['action'] ?? '') === 'download_bat') {
     $rawDomain = preg_replace('/\.test$/i', '', trim($rawDomain));
     $domain = preg_replace('/[^a-zA-Z0-9_-]/', '', $rawDomain) . '.test';
     
+    $confPath = "/etc/nginx/conf.d/$domain.conf";
+    $domains = [$domain];
+    if (file_exists($confPath)) {
+        $content = file_get_contents($confPath);
+        if (preg_match('/server_name\s+(.+?);/', $content, $matches)) {
+            $parsed = array_filter(array_map('trim', explode(' ', $matches[1])));
+            if (!empty($parsed)) $domains = array_values($parsed);
+        }
+    }
+    
     $bat = "@echo off\r\n";
     $bat .= ":: BatchGotAdmin\r\n";
     $bat .= ":-------------------------------------\r\n";
@@ -88,19 +98,23 @@ if (($_GET['action'] ?? '') === 'download_bat') {
     $bat .= "echo  Docker Local Webserver - Fix Hosts File\r\n";
     $bat .= "echo ===========================================\r\n";
     $bat .= "echo.\r\n";
-    $bat .= "echo Adding $domain to Windows hosts file...\r\n";
-    $bat .= "findstr /I /C:\"$domain\" %WINDIR%\\System32\\drivers\\etc\\hosts >nul\r\n";
-    $bat .= "if %errorlevel% neq 0 (\r\n";
-    $bat .= "    echo 127.0.0.1    $domain >> %WINDIR%\\System32\\drivers\\etc\\hosts\r\n";
-    $bat .= "    echo [OK] Domain added successfully.\r\n";
-    $bat .= ") else (\r\n";
-    $bat .= "    echo [INFO] Domain already exists in hosts file.\r\n";
-    $bat .= ")\r\n";
-    $bat .= "echo.\r\n";
+    
+    foreach ($domains as $d) {
+        $bat .= "echo Adding $d to Windows hosts file...\r\n";
+        $bat .= "findstr /I /C:\"$d\" %WINDIR%\\System32\\drivers\\etc\\hosts >nul\r\n";
+        $bat .= "if %errorlevel% neq 0 (\r\n";
+        $bat .= "    >> %WINDIR%\\System32\\drivers\\etc\\hosts echo 127.0.0.1	$d\r\n";
+        $bat .= "    echo [OK] $d added successfully.\r\n";
+        $bat .= ") else (\r\n";
+        $bat .= "    echo [INFO] $d already exists in hosts file.\r\n";
+        $bat .= ")\r\n";
+        $bat .= "echo.\r\n";
+    }
+    
     $bat .= "echo Reloading Nginx container...\r\n";
     $bat .= "docker exec nginx nginx -s reload\r\n";
     $bat .= "echo.\r\n";
-    $bat .= "echo Done! You can now access https://$domain in your browser.\r\n";
+    $bat .= "echo Done! You can now access your domains in the browser.\r\n";
     $bat .= "pause\r\n";
 
     header('Content-Type: application/bat');
@@ -113,6 +127,16 @@ if (($_GET['action'] ?? '') === 'download_remove_bat') {
     $rawDomain = $_GET['domain'] ?? '';
     $rawDomain = preg_replace('/\.test$/i', '', trim($rawDomain));
     $domain = preg_replace('/[^a-zA-Z0-9_-]/', '', $rawDomain) . '.test';
+    
+    $confPath = "/etc/nginx/conf.d/$domain.conf";
+    $domains = [$domain];
+    if (file_exists($confPath)) {
+        $content = file_get_contents($confPath);
+        if (preg_match('/server_name\s+(.+?);/', $content, $matches)) {
+            $parsed = array_filter(array_map('trim', explode(' ', $matches[1])));
+            if (!empty($parsed)) $domains = array_values($parsed);
+        }
+    }
     
     $bat = "@echo off\r\n";
     $bat .= ":: BatchGotAdmin\r\n";
@@ -139,11 +163,19 @@ if (($_GET['action'] ?? '') === 'download_remove_bat') {
     $bat .= "echo  Docker Local Webserver - Clean Hosts File\r\n";
     $bat .= "echo ===========================================\r\n";
     $bat .= "echo.\r\n";
-    $bat .= "echo Removing $domain from Windows hosts file...\r\n";
-    $bat .= "findstr /I /V /C:\"$domain\" %WINDIR%\\System32\\drivers\\etc\\hosts > \"%temp%\\hosts_clean.tmp\"\r\n";
+    
+    // Copy hosts to temp once
+    $bat .= "copy /Y %WINDIR%\\System32\\drivers\\etc\\hosts \"%temp%\\hosts_clean.tmp\" >nul\r\n";
+    
+    foreach ($domains as $d) {
+        $bat .= "echo Removing $d from Windows hosts file...\r\n";
+        $bat .= "findstr /I /V /C:\"$d\" \"%temp%\\hosts_clean.tmp\" > \"%temp%\\hosts_clean2.tmp\"\r\n";
+        $bat .= "copy /Y \"%temp%\\hosts_clean2.tmp\" \"%temp%\\hosts_clean.tmp\" >nul\r\n";
+    }
+    
     $bat .= "copy /Y \"%temp%\\hosts_clean.tmp\" %WINDIR%\\System32\\drivers\\etc\\hosts >nul\r\n";
-    $bat .= "del \"%temp%\\hosts_clean.tmp\"\r\n";
-    $bat .= "echo [OK] Domain removed successfully.\r\n";
+    $bat .= "del \"%temp%\\hosts_clean.tmp\" \"%temp%\\hosts_clean2.tmp\"\r\n";
+    $bat .= "echo [OK] Domains removed successfully.\r\n";
     $bat .= "echo.\r\n";
     $bat .= "pause\r\n";
 
@@ -191,12 +223,25 @@ if ($action === 'create') {
     $phpVer = preg_replace('/[^0-9]/', '', $_POST['php_version'] ?? '84');
     $type = $_POST['type'] ?? 'standard';
     
+    $rawAliases = $_POST['aliases'] ?? '';
+    $aliases = [];
+    if (!empty(trim($rawAliases))) {
+        $parts = explode(',', $rawAliases);
+        foreach ($parts as $p) {
+            $p = trim($p);
+            if (!empty($p)) $aliases[] = $p;
+        }
+    }
+    
     if ($name) {
         $domain = $name . '.test';
         $siteDir = "/var/www/html/$domain";
         $confDir = "/etc/nginx/conf.d";
         $templatePath = "$confDir/_template.conf.example";
         $confPath = "$confDir/$domain.conf";
+        
+        $allDomains = array_values(array_unique(array_merge([$domain], $aliases)));
+        $domainList = implode(' ', $allDomains);
         
         if (!is_dir($siteDir)) {
             // 1. Create Directories
@@ -281,8 +326,8 @@ EOD;
             if (file_exists($templatePath)) {
                 $template = file_get_contents($templatePath);
                 $config = str_replace(
-                    ['{{DOMAIN}}', '{{PHP_VERSION}}', '{{ROOT_PATH}}'],
-                    [$domain, "php$phpVer", $rootPath],
+                    ['{{DOMAIN}}', '{{DOMAIN_LIST}}', '{{PHP_VERSION}}', '{{ROOT_PATH}}'],
+                    [$domain, $domainList, "php$phpVer", $rootPath],
                     $template
                 );
                 
@@ -295,7 +340,8 @@ EOD;
                     $certId = 0;
                     $certPath = "/tmp/$domain.pem";
                     $keyPath = "/tmp/$domain-key.pem";
-                    exec("CAROOT=/var/www/ssl/ca /var/www/ssl/mkcert -cert-file $certPath -key-file $keyPath $domain", $output, $ret);
+                    $mkcertArgs = implode(' ', array_map('escapeshellarg', $allDomains));
+                    exec("CAROOT=/var/www/ssl/ca /var/www/ssl/mkcert -cert-file $certPath -key-file $keyPath " . $mkcertArgs, $output, $ret);
                     
                     if ($ret === 0 && file_exists($certPath)) {
                         $uploadRes = uploadNpmCertificate($token, "$domain SSL", $certPath, $keyPath);
@@ -308,7 +354,7 @@ EOD;
                     
                     // Create Proxy Host
                     $payload = [
-                        'domain_names' => [$domain],
+                        'domain_names' => $allDomains,
                         'forward_scheme' => 'http',
                         'forward_host' => 'nginx',
                         'forward_port' => 8000,
@@ -345,6 +391,98 @@ EOD;
             }
         } else {
             $_SESSION['flash'] = ['type' => 'error', 'message' => "Project folder already exists!"];
+        }
+    }
+    header('Location: /');
+    exit;
+}
+
+if ($action === 'edit') {
+    $domain = preg_replace('/[^a-zA-Z0-9_.-]/', '', $_POST['domain'] ?? '');
+    $rawAliases = $_POST['aliases'] ?? '';
+    
+    if ($domain && strpos($domain, '.test') !== false && $domain !== 'default.test') {
+        $aliases = [];
+        if (!empty(trim($rawAliases))) {
+            $parts = explode(',', $rawAliases);
+            foreach ($parts as $p) {
+                $p = trim($p);
+                if (!empty($p)) $aliases[] = $p;
+            }
+        }
+        
+        $confPath = "/etc/nginx/conf.d/$domain.conf";
+        $allDomains = array_values(array_unique(array_merge([$domain], $aliases)));
+        $domainList = implode(' ', $allDomains);
+        
+        if (file_exists($confPath)) {
+            // Update Nginx
+            $content = file_get_contents($confPath);
+            $content = preg_replace('/server_name\s+(.+?);/', "server_name $domainList;", $content);
+            file_put_contents($confPath, $content);
+            
+            // Generate new cert
+            $certId = 0;
+            $certPath = "/tmp/$domain.pem";
+            $keyPath = "/tmp/$domain-key.pem";
+            $mkcertArgs = implode(' ', array_map('escapeshellarg', $allDomains));
+            exec("CAROOT=/var/www/ssl/ca /var/www/ssl/mkcert -cert-file $certPath -key-file $keyPath " . $mkcertArgs, $output, $ret);
+            
+            if ($ret === 0 && file_exists($certPath)) {
+                $uploadRes = uploadNpmCertificate($npmToken, "$domain SSL (Edited)", $certPath, $keyPath);
+                if ($uploadRes['status'] === 200 || $uploadRes['status'] === 201) {
+                    $certId = $uploadRes['data']['id'];
+                }
+                @unlink($certPath);
+                @unlink($keyPath);
+            }
+            
+            // Update Proxy Host in NPM
+            $proxyRes = callNpmApi('GET', '/nginx/proxy-hosts', [], $npmToken);
+            $hostFound = false;
+            $oldCertId = 0;
+            if ($proxyRes['status'] === 200) {
+                foreach ($proxyRes['data'] as $host) {
+                    if (in_array($domain, $host['domain_names'])) {
+                        $hostFound = true;
+                        $oldCertId = $host['certificate_id'] ?? 0;
+                        
+                        $payload = [
+                            'domain_names' => $allDomains,
+                            'forward_scheme' => $host['forward_scheme'],
+                            'forward_host' => $host['forward_host'],
+                            'forward_port' => $host['forward_port'],
+                            'certificate_id' => $certId,
+                            'ssl_forced' => ($certId > 0),
+                            'meta' => $host['meta'],
+                            'advanced_config' => $host['advanced_config'],
+                            'locations' => $host['locations'],
+                            'block_exploits' => $host['block_exploits'],
+                            'caching_enabled' => $host['caching_enabled'],
+                            'allow_websocket_upgrade' => $host['allow_websocket_upgrade'],
+                            'http2_support' => $host['http2_support'],
+                            'hsts_enabled' => $host['hsts_enabled'],
+                            'hsts_subdomains' => $host['hsts_subdomains']
+                        ];
+                        callNpmApi('PUT', "/nginx/proxy-hosts/{$host['id']}", $payload, $npmToken);
+                        
+                        // Delete old cert if we have a new one
+                        if ($certId > 0 && $oldCertId > 0 && $oldCertId !== $certId) {
+                            callNpmApi('DELETE', "/nginx/certificates/$oldCertId", [], $npmToken);
+                        }
+                        break;
+                    }
+                }
+            }
+            
+            $_SESSION['flash'] = [
+                'type' => 'success',
+                'title' => 'Project Updated!',
+                'message' => "Domains and SSL for <strong>$domain</strong> have been updated.",
+                'domain' => $domain
+            ];
+        } else {
+            $_SESSION['flash'] = ['type' => 'error', 'message' => "Nginx config not found for $domain"];
         }
     }
     header('Location: /');
@@ -733,9 +871,28 @@ sort($sites);
                                                 Open <iconify-icon icon="mdi:open-in-new"></iconify-icon>
                                             </span>
                                         </a>
-                                        <button type="button" onclick="confirmDelete('<?= htmlspecialchars($site) ?>')" class="ml-4 text-slate-500 hover:text-red-400 p-2 rounded-lg hover:bg-red-500/10 transition-colors tooltip" title="Delete Site">
-                                            <iconify-icon icon="mdi:trash-can-outline" class="text-lg"></iconify-icon>
-                                        </button>
+                                        <?php
+                                            $siteAliases = '';
+                                            $confPath = "/etc/nginx/conf.d/$site.conf";
+                                            if (file_exists($confPath)) {
+                                                $content = file_get_contents($confPath);
+                                                if (preg_match('/server_name\s+(.+?);/', $content, $matches)) {
+                                                    $parsed = array_filter(array_map('trim', explode(' ', $matches[1])));
+                                                    $parsed = array_filter($parsed, function($d) use ($site) { 
+                                                        return $d !== $site; 
+                                                    });
+                                                    if (!empty($parsed)) $siteAliases = implode(', ', $parsed);
+                                                }
+                                            }
+                                        ?>
+                                        <div class="flex items-center space-x-1 ml-4">
+                                            <button type="button" onclick="openEditModal('<?= htmlspecialchars($site) ?>', '<?= htmlspecialchars($siteAliases, ENT_QUOTES) ?>')" class="text-slate-500 hover:text-indigo-400 p-2 rounded-lg hover:bg-indigo-500/10 transition-colors tooltip" title="Edit Domains">
+                                                <iconify-icon icon="mdi:pencil-outline" class="text-lg"></iconify-icon>
+                                            </button>
+                                            <button type="button" onclick="confirmDelete('<?= htmlspecialchars($site) ?>')" class="text-slate-500 hover:text-red-400 p-2 rounded-lg hover:bg-red-500/10 transition-colors tooltip" title="Delete Site">
+                                                <iconify-icon icon="mdi:trash-can-outline" class="text-lg"></iconify-icon>
+                                            </button>
+                                        </div>
                                     </div>
                                 </li>
                                 <?php endforeach; ?>
@@ -866,6 +1023,12 @@ sort($sites);
                         </div>
                         
                         <div>
+                            <label class="block text-sm font-medium text-slate-300 mb-1.5">Aliases / Custom Domains (Optional)</label>
+                            <input type="text" name="aliases" placeholder="api.myapp.test, myotherdomain.com" class="form-input w-full">
+                            <p class="text-xs text-slate-500 mt-1.5">Comma separated. E.g: admin.myapp.test, *.myapp.test</p>
+                        </div>
+                        
+                        <div>
                             <label class="block text-sm font-medium text-slate-300 mb-1.5">PHP Version</label>
                             <div class="relative">
                                 <select name="php_version" class="form-input appearance-none">
@@ -959,6 +1122,44 @@ sort($sites);
             </div>
         </div>
     </div>
+    <!-- Edit Site Modal -->
+    <div id="editModal" class="fixed inset-0 z-50 hidden opacity-0 modal-transition">
+        <div class="absolute inset-0 bg-slate-950/80 backdrop-blur-sm" onclick="toggleModal('editModal')"></div>
+        <div class="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:p-0">
+            <div class="relative bg-surface border border-slate-700 rounded-2xl text-left overflow-hidden shadow-[0_20px_50px_rgba(0,0,0,0.5)] transform transition-all sm:my-8 sm:max-w-lg w-full">
+                <div class="px-6 py-5 border-b border-slate-700/50 flex justify-between items-center bg-slate-900/50">
+                    <h3 class="text-lg font-semibold text-white flex items-center gap-2">
+                        <iconify-icon icon="mdi:pencil-outline" class="text-indigo-400"></iconify-icon>
+                        Edit Domains for <span id="editDomainTitle" class="text-pink-400"></span>
+                    </h3>
+                    <button type="button" onclick="toggleModal('editModal')" class="text-slate-400 hover:text-white transition-colors">
+                        <iconify-icon icon="mdi:close" class="text-xl"></iconify-icon>
+                    </button>
+                </div>
+                <form method="POST" action="/" class="spa-form">
+                    <input type="hidden" name="action" value="edit">
+                    <input type="hidden" name="domain" id="editDomainInput" value="">
+                    <div class="px-6 py-6 space-y-5">
+                        <p class="text-sm text-slate-400">Update the additional domains or subdomains for this project.</p>
+                        <div>
+                            <label class="block text-sm font-medium text-slate-300 mb-1.5">Aliases / Custom Domains</label>
+                            <input type="text" id="editAliasesInput" name="aliases" placeholder="api.myapp.test, myotherdomain.com" class="form-input w-full">
+                            <p class="text-xs text-slate-500 mt-1.5">Comma separated. E.g: admin.myapp.test, *.myapp.test</p>
+                        </div>
+                    </div>
+                    <div class="px-6 py-4 bg-slate-900/80 border-t border-slate-700/50 flex justify-end gap-3 rounded-b-2xl">
+                        <button type="button" onclick="toggleModal('editModal')" class="px-4 py-2 text-sm font-medium text-slate-300 hover:text-white transition-colors">
+                            Cancel
+                        </button>
+                        <button type="submit" class="bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-2 rounded-lg text-sm font-medium transition-colors shadow-lg shadow-indigo-500/20 flex items-center gap-2">
+                            <iconify-icon icon="mdi:content-save"></iconify-icon> Save Changes
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    
     <!-- Delete Site Modal -->
     <div id="deleteModal" class="fixed inset-0 z-[60] hidden opacity-0 modal-transition">
         <div class="absolute inset-0 bg-slate-950/80 backdrop-blur-sm" onclick="toggleModal('deleteModal')"></div>
@@ -998,6 +1199,13 @@ sort($sites);
             document.getElementById('deleteDomainInput').value = domain;
             document.getElementById('deleteDomainText').textContent = domain;
             toggleModal('deleteModal');
+        }
+
+        function openEditModal(domain, aliases = '') {
+            document.getElementById('editDomainInput').value = domain;
+            document.getElementById('editDomainTitle').textContent = domain;
+            document.getElementById('editAliasesInput').value = aliases;
+            toggleModal('editModal');
         }
 
         document.querySelectorAll('.spa-form').forEach(form => {

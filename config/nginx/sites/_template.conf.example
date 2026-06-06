@@ -16,7 +16,7 @@
 
 server {
     listen 8000;
-    server_name {{DOMAIN}};
+    server_name {{DOMAIN_LIST}};
 
     root {{ROOT_PATH}};
     index index.php index.html;

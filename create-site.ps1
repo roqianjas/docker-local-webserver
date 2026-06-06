@@ -101,6 +101,7 @@ if (-not (Test-Path $templateFile)) {
 $template = Get-Content $templateFile -Raw
 $config = $template `
     -replace '\{\{DOMAIN\}\}', $domain `
+    -replace '\{\{DOMAIN_LIST\}\}', "$domain *.$domain" `
     -replace '\{\{PHP_VERSION\}\}', $phpContainer `
     -replace '\{\{ROOT_PATH\}\}', $rootPath
 
