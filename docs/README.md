@@ -23,7 +23,7 @@ Selamat datang di dokumentasi Docker Local Webserver. Semua dokumen ditulis dala
 
 ```powershell
 # 1. Clone & setup (sekali saja, jalankan sebagai Administrator)
-git clone https://github.com/USERNAME/docker-local-webserver.git c:\docker
+git clone https://github.com/roqianjas/docker-local-webserver.git c:\docker
 cd c:\docker
 Copy-Item .env.example .env
 .\setup.ps1

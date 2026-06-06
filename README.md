@@ -27,7 +27,7 @@ Webserver lokal berbasis Docker untuk development di Windows. Pengganti Laragon/
 
 ```powershell
 # 1. Clone repository
-git clone https://github.com/USERNAME/docker-local-webserver.git c:\docker
+git clone https://github.com/roqianjas/docker-local-webserver.git c:\docker
 
 # 2. Copy environment file
 cd c:\docker
