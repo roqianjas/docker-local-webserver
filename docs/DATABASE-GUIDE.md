@@ -88,10 +88,15 @@ Untuk DBeaver, DataGrip, VS Code, HeidiSQL, dll:
 
 | Property | Value |
 |----------|-------|
-| Host | `localhost` |
+| Host | `127.0.0.1` atau `localhost` |
 | Port | `3306` |
 | User | `root` (atau `homestead`) |
 | Password | `secret` |
+
+> **🛡️ WINDOWS 11 / VPN USERS:**
+> Jika Anda menggunakan VPN (seperti **Cloudflare WARP**, VeePN) atau fitur *WSL2 Mirrored Networking*, aplikasi *database manager* seperti Beekeeper/DBeaver akan mengalami **Timeout (ETIMEDOUT)** saat mengakses `127.0.0.1`.
+> 
+> **Solusi Permanen:** Buat Adapter Jaringan Virtual (Loopback) dengan IP statis (misal `10.10.10.10`) dan gunakan IP tersebut sebagai Host. Lihat panduan lengkapnya di [TROUBLESHOOTING.md](TROUBLESHOOTING.md#dbeaverbeekeeper-timeout-karena-vpn-cloudflare-warp).
 
 ---
 

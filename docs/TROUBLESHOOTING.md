@@ -74,6 +74,36 @@ docker compose up -d --build
 
 ---
 
+## DBeaver/Beekeeper Timeout karena VPN (Cloudflare WARP)
+
+**Gejala:** Koneksi dari DBeaver atau Beekeeper Studio ke MariaDB `127.0.0.1:3306` selalu menghasilkan `ETIMEDOUT`, `Connection timed out: getsockopt`, atau `ECONNREFUSED`. Namun koneksi phpMyAdmin (`localhost:8080`) atau CLI berfungsi normal.
+
+**Penyebab:** 
+1. Anda menggunakan VPN seperti **Cloudflare WARP** atau VeePN yang membajak (hijack) trafik *loopback* (`127.0.0.1`).
+2. Windows 11 Anda menggunakan fitur *WSL2 Mirrored Networking* dengan konfigurasi `firewall=true` di `.wslconfig` yang agresif memblokir port *localhost* dari aplikasi desktop.
+
+**Solusi Permanen (Membuat Microsoft Loopback Adapter):**
+Solusi paling handal di Windows adalah membuat adapter jaringan virtual khusus dengan IP statis (misal `10.10.10.10`). Docker akan mendeteksi IP ini, dan aplikasi GUI bisa melewati blokiran.
+
+**Tahap 1: Buat Adapter Virtual**
+1. Tekan tombol `Windows + R`, ketik `hdwwiz` (Hardware Wizard), tekan Enter.
+2. Klik **Next** -> Pilih **Install the hardware that I manually select from a list (Advanced)** -> **Next**.
+3. Pilih **Network adapters** -> **Next**.
+4. Di Manufacturer pilih **Microsoft**, di Model pilih **Microsoft KM-TEST Loopback Adapter** -> **Next** -> **Finish**.
+
+**Tahap 2: Beri IP Permanen (10.10.10.10)**
+1. Tekan `Windows + R`, ketik `ncpa.cpl` (Network Connections), tekan Enter.
+2. Klik kanan pada Adapter baru tersebut (biasanya bernama *Local Area Connection X* dengan deskripsi *Microsoft KM-TEST Loopback Adapter*) -> **Properties**.
+3. Pilih **Internet Protocol Version 4 (TCP/IPv4)** -> **Properties**.
+4. Pilih **Use the following IP address**. Isi IP address: `10.10.10.10`.
+5. Klik pada kotak Subnet mask, biarkan otomatis terisi `255.0.0.0`.
+6. Klik **OK**, lalu **Close**.
+
+**Tahap 3: Hubungkan Aplikasi**
+Buka DBeaver / Beekeeper Studio, ganti Host menjadi `10.10.10.10` dan Port `3306`. Koneksi akan mulus tanpa hambatan!
+
+---
+
 ## Redis Connection Refused
 
 **Solusi:**
